@@ -1,15 +1,106 @@
 /* Drive Images plugin styles */
 
-.od-device-code-modal .od-user-code {
-  font-size: 2em;
-  font-weight: bold;
-  letter-spacing: 0.15em;
+/* ── Settings ─────────────────────────────────────────────────────────── */
+
+.od-settings .od-card {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-3);
+  padding: var(--size-4-3) var(--size-4-4);
+  margin: var(--size-4-2) 0 var(--size-4-4);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.od-settings .od-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.od-settings .od-card-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.od-settings .od-card-sub {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.od-settings .od-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.od-settings .od-dot.is-on {
+  background: var(--color-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-green) 22%, transparent);
+}
+
+.od-settings .od-count {
+  flex: none;
+  min-width: 1.6em;
+  font-size: var(--font-ui-larger);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
   text-align: center;
-  margin: 1em 0;
+  color: var(--text-normal);
+}
+
+.od-settings .od-section {
+  margin: var(--size-4-2) 0;
+}
+
+.od-settings .od-section > summary {
+  cursor: pointer;
+  padding: var(--size-4-2) 0;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.od-settings .od-section > summary:hover {
+  color: var(--text-normal);
+}
+
+.od-settings .od-section-body {
+  padding-left: var(--size-4-3);
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+/* ── Device code modal ────────────────────────────────────────────────── */
+
+.od-device-code-modal {
+  text-align: center;
+}
+
+.od-device-code-modal .od-user-code {
+  display: inline-block;
+  margin: var(--size-4-4) 0;
+  padding: var(--size-4-3) var(--size-4-6);
+  font-family: var(--font-monospace);
+  font-size: 2em;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.2em;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
   user-select: all;
 }
 
+.od-device-code-modal .od-btn-row {
+  display: flex;
+  justify-content: center;
+}
+
 .od-device-code-modal .od-status {
-  margin-top: 1em;
-  opacity: 0.8;
+  margin-top: var(--size-4-4);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
 }

@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type DriveImagesPlugin from '../plugin/main';
 import type { EmbedFormat } from '../drive/types';
 import { UnauthorizedError } from '../drive/client';
+import { deletePendingFromDrive } from '../plugin/driveTrash';
 
 export class DriveImagesSettingTab extends PluginSettingTab {
   plugin: DriveImagesPlugin;
@@ -13,182 +14,175 @@ export class DriveImagesSettingTab extends PluginSettingTab {
 
   display(): void {
     const { containerEl } = this;
+    const { settings } = this.plugin;
+    this.plugin.onPendingChanged = () => this.display();
     containerEl.empty();
+    containerEl.addClass('od-settings');
 
-    new Setting(containerEl).setName('Account').setHeading();
+    const save = (fn: () => void) => {
+      fn();
+      void this.plugin.saveSettings();
+    };
 
-    const signedIn = !!this.plugin.settings.tokens;
-    const accountSetting = new Setting(containerEl);
-    if (signedIn) {
-      accountSetting
-        .setName('Signed in to Google Drive')
-        .setDesc('Connected.')
-        .addButton((btn) =>
-          btn
-            .setButtonText('Sign out')
-            .setWarning()
-            .onClick(async () => {
-              btn.setDisabled(true).setButtonText('Signing out…');
-              try {
-                await this.plugin.signOut();
-                // Re-renders the whole tab, rebuilding the buttons.
-                this.display();
-              } finally {
-                // On the error path this.display() is skipped, so make sure the
-                // button is never left stuck disabled. (After a successful
-                // re-render this acts on the now-detached element: harmless.)
-                btn.setDisabled(false).setButtonText('Sign out');
-              }
-            }),
-        );
-    } else {
-      accountSetting.setName('Not signed in').addButton((btn) =>
-        btn
-          .setButtonText('Sign in')
-          .setCta()
-          .onClick(async () => {
-            btn.setDisabled(true).setButtonText('Signing in…');
-            try {
-              await this.plugin.signIn();
-              // Re-renders the whole tab, rebuilding the buttons.
-              this.display();
-            } finally {
-              // On the error path this.display() is skipped, so make sure the
-              // button is never left stuck disabled. (After a successful
-              // re-render this acts on the now-detached element: harmless.)
-              btn.setDisabled(false).setButtonText('Sign in');
-            }
-          }),
-      );
-    }
+    // ── Account ────────────────────────────────────────────────────────────
+    const signedIn = !!settings.tokens;
+    const account = containerEl.createDiv({ cls: 'od-card od-account' });
+    account.createSpan({ cls: `od-dot ${signedIn ? 'is-on' : ''}` });
+    const accountText = account.createDiv({ cls: 'od-card-text' });
+    accountText.createDiv({
+      cls: 'od-card-title',
+      text: signedIn ? 'Connected to Google Drive' : 'Not connected',
+    });
+    accountText.createDiv({
+      cls: 'od-card-sub',
+      text: signedIn
+        ? `Uploading to ${settings.folderName || 'Drive root'}`
+        : 'Add your credentials below, then sign in.',
+    });
+    const accountBtn = account.createEl('button', {
+      text: signedIn ? 'Sign out' : 'Sign in',
+      cls: signedIn ? '' : 'mod-cta',
+    });
+    accountBtn.addEventListener('click', () => {
+      void (async () => {
+        accountBtn.disabled = true;
+        accountBtn.setText(signedIn ? 'Signing out…' : 'Signing in…');
+        try {
+          await (signedIn ? this.plugin.signOut() : this.plugin.signIn());
+        } finally {
+          this.display();
+        }
+      })();
+    });
 
-    new Setting(containerEl).setName('Google Drive credentials').setHeading();
-
-    new Setting(containerEl)
+    // Credentials are one-time setup: tucked away once the account is connected.
+    const creds = this.section(containerEl, 'Credentials', !signedIn);
+    new Setting(creds)
       .setName('Client ID')
-      .setDesc('OAuth 2.0 "TVs and Limited Input devices" client ID.')
+      .setDesc('OAuth client of type "TVs and Limited Input devices".')
       .addText((text) =>
         text
           .setPlaceholder('xxxxx.apps.googleusercontent.com')
-          .setValue(this.plugin.settings.clientId)
-          .onChange((value) => {
-            void (async () => {
-              this.plugin.settings.clientId = value.trim();
-              await this.plugin.saveSettings();
-            })();
-          }),
+          .setValue(settings.clientId)
+          .onChange((v) => save(() => (settings.clientId = v.trim()))),
       );
-
-    new Setting(containerEl)
+    new Setting(creds)
       .setName('Client secret')
-      .setDesc('Treated as non-confidential in Device Flow, but do not share it.')
+      .setDesc('Not confidential in the device flow, but keep it private.')
       .addText((text) => {
-        text
-          .setPlaceholder('client secret')
-          .setValue(this.plugin.settings.clientSecret)
-          .onChange((value) => {
-            void (async () => {
-              this.plugin.settings.clientSecret = value.trim();
-              await this.plugin.saveSettings();
-            })();
-          });
+        text.setValue(settings.clientSecret).onChange((v) => save(() => (settings.clientSecret = v.trim())));
         text.inputEl.type = 'password';
       });
 
+    // ── Storage ────────────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Storage').setHeading();
+
     new Setting(containerEl)
-      .setName('Destination folder path')
-      .setDesc('Folder path for uploads; use / for subfolders. The plugin creates and owns these folders.')
+      .setName('Folder')
+      .setDesc('Drive folder for uploads. Use / for subfolders.')
       .addText((text) =>
         text
           .setPlaceholder('Obsidian Images')
-          .setValue(this.plugin.settings.folderName)
-          .onChange((value) => {
-            void (async () => {
-              this.plugin.settings.folderName = value.trim();
-              await this.plugin.saveSettings();
-            })();
-          }),
+          .setValue(settings.folderName)
+          .onChange((v) => save(() => (settings.folderName = v.trim()))),
       )
-      .addButton((btn) =>
+      .addExtraButton((btn) =>
         btn
-          .setButtonText('Create / connect folder')
-          .setTooltip('Find or create the plugin-owned folder path.')
+          .setIcon('folder-sync')
+          .setTooltip('Create or connect this folder now')
           .onClick(async () => {
-            const original = 'Create / connect folder';
-            btn.setDisabled(true).setButtonText('Working…');
+            btn.setDisabled(true);
             try {
-              // Keeps the existing find/create logic + Notices intact.
               await this.ensureFolder();
             } finally {
-              // This button does not call this.display(), so restore the label
-              // and re-enable it here on every path.
-              btn.setDisabled(false).setButtonText(original);
+              btn.setDisabled(false);
             }
           }),
       );
 
     new Setting(containerEl)
-      .setName('Parent folder ID (optional)')
-      .setDesc(
-        'If set, the path is created inside this existing Drive folder (paste its ID from the folder URL). Leave empty to use My Drive root.',
-      )
+      .setName('Public links')
+      .setDesc('Let anyone with the link view uploads, so images render in notes.')
+      .addToggle((t) => t.setValue(settings.makePublic).onChange((v) => save(() => (settings.makePublic = v))));
+
+    new Setting(containerEl)
+      .setName('Link format')
+      .setDesc('The URL style written into notes.')
+      .addDropdown((dd) =>
+        dd
+          .addOption('lh3', 'lh3 (fastest)')
+          .addOption('thumbnail', 'Thumbnail')
+          .addOption('apiMedia', 'API media')
+          .setValue(settings.embedFormat)
+          .onChange((v) => save(() => (settings.embedFormat = v as EmbedFormat))),
+      );
+
+    // ── Clean up ───────────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Clean up').setHeading();
+
+    new Setting(containerEl)
+      .setName('Track removed images')
+      .setDesc('List images you delete from your notes. Undo takes them off the list.')
+      .addToggle((t) =>
+        t.setValue(settings.trackRemovedImages).onChange((v) => save(() => (settings.trackRemovedImages = v))),
+      );
+
+    const pending = Object.keys(settings.pendingDeletes).length;
+    const card = containerEl.createDiv({ cls: 'od-card od-pending' });
+    card.createSpan({ cls: 'od-count', text: String(pending) });
+    const cardText = card.createDiv({ cls: 'od-card-text' });
+    cardText.createDiv({
+      cls: 'od-card-title',
+      text: pending === 1 ? 'Image waiting to be deleted' : 'Images waiting to be deleted',
+    });
+    cardText.createDiv({
+      cls: 'od-card-sub',
+      text: 'Moved to the Drive trash, recoverable for 30 days. Images still in use are skipped.',
+    });
+    const delBtn = card.createEl('button', { text: 'Delete from Drive', cls: 'mod-warning' });
+    delBtn.disabled = pending === 0;
+    delBtn.addEventListener('click', () => {
+      void (async () => {
+        delBtn.disabled = true;
+        delBtn.setText('Deleting…');
+        try {
+          await deletePendingFromDrive(this.plugin);
+        } finally {
+          this.display();
+        }
+      })();
+    });
+
+    new Setting(containerEl)
+      .setName('Trash local copy after converting')
+      .setDesc('When converting local images to Drive links, move the original file to the system trash.')
+      .addToggle((t) =>
+        t.setValue(settings.deleteLocalAfterConvert).onChange((v) => save(() => (settings.deleteLocalAfterConvert = v))),
+      );
+
+    // ── Advanced ───────────────────────────────────────────────────────────
+    const advanced = this.section(containerEl, 'Advanced', false);
+    new Setting(advanced)
+      .setName('Parent folder ID')
+      .setDesc('Create the folder inside this existing Drive folder (ID from its URL). Empty uses My Drive.')
       .addText((text) =>
         text
           .setPlaceholder('1AbC…')
-          .setValue(this.plugin.settings.parentFolderId)
-          .onChange((value) => {
-            void (async () => {
-              this.plugin.settings.parentFolderId = value.trim();
-              await this.plugin.saveSettings();
-            })();
-          }),
+          .setValue(settings.parentFolderId)
+          .onChange((v) => save(() => (settings.parentFolderId = v.trim()))),
       );
+  }
 
-    new Setting(containerEl).setName('Embedding').setHeading();
+  /** A collapsible group of settings. */
+  private section(parent: HTMLElement, title: string, open: boolean): HTMLElement {
+    const details = parent.createEl('details', { cls: 'od-section' });
+    details.open = open;
+    details.createEl('summary', { text: title });
+    return details.createDiv({ cls: 'od-section-body' });
+  }
 
-    new Setting(containerEl)
-      .setName('Embed URL format')
-      .setDesc('URL form inserted into notes. lh3 is fastest but unofficial.')
-      .addDropdown((dd) => {
-        dd.addOption('lh3', 'lh3 (googleusercontent)');
-        dd.addOption('thumbnail', 'thumbnail');
-        dd.addOption('apiMedia', 'API media (alt=media)');
-        dd.setValue(this.plugin.settings.embedFormat);
-        dd.onChange((value) => {
-          void (async () => {
-            this.plugin.settings.embedFormat = value as EmbedFormat;
-            await this.plugin.saveSettings();
-          })();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName('Make uploads public')
-      .setDesc('Grant "anyone with the link" read access so images render directly.')
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.makePublic).onChange((value) => {
-          void (async () => {
-            this.plugin.settings.makePublic = value;
-            await this.plugin.saveSettings();
-          })();
-        }),
-      );
-
-    new Setting(containerEl).setName('Bulk conversion').setHeading();
-
-    new Setting(containerEl)
-      .setName('Delete local file after converting')
-      .setDesc(
-        'Move the original attachment to system trash after a successful upload. Off by default; the file may still be referenced by other notes.',
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.deleteLocalAfterConvert).onChange((value) => {
-          void (async () => {
-            this.plugin.settings.deleteLocalAfterConvert = value;
-            await this.plugin.saveSettings();
-          })();
-        }),
-      );
+  hide(): void {
+    this.plugin.onPendingChanged = undefined;
   }
 
   /**
