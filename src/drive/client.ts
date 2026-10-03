@@ -83,6 +83,30 @@ export class DriveClient {
   }
 
   /**
+   * Move a file to (or restore it from) the Drive trash. Deliberately a trash
+   * flag rather than a permanent delete: it is reversible, which is what makes
+   * editor undo safe. Drive purges trashed files itself after 30 days.
+   * Returns 'missing' if the file no longer exists (404), which callers treat
+   * as already-gone. Throws UnauthorizedError on 401.
+   */
+  async setTrashed(fileId: string, trashed: boolean): Promise<'ok' | 'missing'> {
+    const token = await this.getAccessToken();
+    const res = await this.request({
+      url: `${FILES_URL}/${fileId}?fields=id`,
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+      contentType: 'application/json',
+      body: JSON.stringify({ trashed }),
+    });
+    if (res.status === 401) throw new UnauthorizedError();
+    if (res.status === 404) return 'missing';
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`${trashed ? 'Trash' : 'Restore'} failed (${res.status}): ${res.text}`);
+    }
+    return 'ok';
+  }
+
+  /**
    * Make the file readable by anyone with the link. Required for direct render.
    */
   async share(fileId: string): Promise<void> {
