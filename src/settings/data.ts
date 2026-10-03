@@ -17,9 +17,13 @@ export interface Settings {
   makePublic: boolean;
   /** After a successful bulk conversion, move the original attachment to trash. */
   deleteLocalAfterConvert: boolean;
+  /** Track images removed from notes on a pending-deletion list (undo delists them). */
+  trackRemovedImages: boolean;
   tokens: TokenSet | null;
   /** Content sha256 (hex) → Drive fileId, to skip re-uploading identical bytes. */
   uploadCache: Record<string, string>;
+  /** Uploaded files whose image was removed from every note, awaiting "Delete from Drive". */
+  pendingDeletes: Record<string, { addedAt: number }>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,6 +36,8 @@ export const DEFAULT_SETTINGS: Settings = {
   embedFormat: 'lh3',
   makePublic: true,
   deleteLocalAfterConvert: false,
+  trackRemovedImages: true,
   tokens: null,
   uploadCache: {},
+  pendingDeletes: {},
 };

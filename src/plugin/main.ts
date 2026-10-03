@@ -10,6 +10,7 @@ import { retryWithBackoff, parseRetryAfter, expoDelay } from '../drive/retry';
 import { registerCommands } from './commands';
 import { registerConvertContextMenu } from './contextMenu';
 import { registerImageUploadHandlers } from '../editor/pasteHandler';
+import { registerDriveTrashSync } from './driveTrash';
 import { DeviceCodeModal } from '../ui/deviceCodeModal';
 
 // Refresh access tokens this many ms before their nominal expiry to avoid
@@ -18,6 +19,9 @@ const EXPIRY_SKEW_MS = 60_000;
 
 export default class DriveImagesPlugin extends Plugin {
   settings!: Settings;
+
+  /** Set by the settings tab while open so its pending-deletion count stays live. */
+  onPendingChanged?: () => void;
 
   // Serializes ensureFolderId: while one find-or-create resolution is running,
   // concurrent callers (settings button double-click, a paste firing at the same
@@ -31,12 +35,16 @@ export default class DriveImagesPlugin extends Plugin {
     registerCommands(this);
     registerConvertContextMenu(this);
     registerImageUploadHandlers(this);
+    registerDriveTrashSync(this);
   }
 
   onunload() {}
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as Settings;
+    // Shallow merge would alias DEFAULT_SETTINGS' maps when saved data lacks them.
+    this.settings.uploadCache = { ...this.settings.uploadCache };
+    this.settings.pendingDeletes = { ...this.settings.pendingDeletes };
   }
 
   async saveSettings() {
@@ -46,6 +54,11 @@ export default class DriveImagesPlugin extends Plugin {
   /** Content-hash dedup lookup: returns a previously uploaded fileId, if any. */
   getCachedFileId(hash: string): string | undefined {
     return this.settings.uploadCache[hash];
+  }
+
+  /** True if this Drive file was uploaded by this plugin (so it is ours to trash). */
+  isUploadedFileId(id: string): boolean {
+    return id in this.settings.pendingDeletes || Object.values(this.settings.uploadCache).includes(id);
   }
 
   /** Record a content-hash → fileId mapping and persist it. */
